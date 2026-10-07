@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AquaFlow - Admin</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="row">
+    <div>
+      <h2>🏭 <span id="station">Admin</span></h2>
+      <p id="who"></p>
+    </div>
+    <button class="logout" onclick="logout()">Logout</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="stats">
+    <div class="stat"><span id="c-pending">0</span><small>Pending</small></div>
+    <div class="stat"><span id="c-waiting">0</span><small>Waiting</small></div>
+    <div class="stat"><span id="c-processed">0</span><small>Processed</small></div>
+    <div class="stat"><span id="c-delivered">0</span><small>Delivered</small></div>
+  </div>
+
+  <div class="card">
+    <h3>Customer Orders</h3>
+    <div class="filters" id="filters"></div>
+    <div id="list"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let me, all = [], filter = "all";
+
+function drawFilters() {
+  $("filters").innerHTML = ["all", ...STATUSES].map(f =>
+    `<button class="${f === filter ? "active" : ""}" data-f="${f}">${f}</button>`).join("");
+  $("filters").querySelectorAll("button").forEach(b => b.onclick = () => { filter = b.dataset.f; drawFilters(); render(); });
+}
+
+function render() {
+  STATUSES.forEach(s => $("c-" + s).textContent = all.filter(o => o.status === s).length);
+  const rows = filter === "all" ? all : all.filter(o => o.status === filter);
+  if (!rows.length) { $("list").innerHTML = '<div class="empty">No orders here yet 💧</div>'; return; }
+  $("list").innerHTML = rows.map(o => {
+    const c = o.profiles || {};
+    const opts = STATUSES.map(s => `<option value="${s}" ${s === o.status ? "selected" : ""}>${s}</option>`).join("");
+    return `<div class="order">
+      <div class="head"><b>${esc(c.full_name || "Customer")}</b><span class="badge b-${o.status}">${o.status}</span></div>
+      <div class="meta">📞 ${esc(c.phone)} &bull; 📍 ${esc(c.address)}<br>
+      <b>${esc(o.product)}</b> &times; ${o.quantity} &bull; Empty gallons: ${o.empty_gallons}<br>
+      ${o.notes ? "Note: " + esc(o.notes) + "<br>" : ""}${new Date(o.created_at).toLocaleString()}</div>
+      <div class="statusbox">
+        <label>Update delivery status</label>
+        <select onchange="setStatus('${o.id}', this.value)">${opts}</select>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+async function setStatus(id, status) {
+  const { error } = await db.from("orders").update({ status }).eq("id", id);
+  if (error) return toast(error.message);
+  toast("Status updated to " + status);
+  load();
+}
+
+async function load() {
+  const { data } = await db.from("orders")
+    .select("*, profiles(full_name, phone, address)")
+    .order("created_at", { ascending: false });
+  all = data || [];
+  render();
+}
+
+(async () => {
+  me = await requireRole("admin");
+  if (!me) return;
+  $("who").textContent = "Admin: " + me.full_name;
+  const { data: st } = await db.from("stations").select("name").eq("id", me.station_id).single();
+  if (st) $("station").textContent = st.name;
+  drawFilters();
+  load();
+  db.channel("admin-orders").on("postgres_changes",
+    { event: "*", schema: "public", table: "orders" }, load).subscribe();
+})();
+</script>
+</body>
+</html>
