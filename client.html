@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AquaFlow - Customer</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="row">
+    <div>
+      <h2>💧 Hello, <span id="who">...</span></h2>
+      <p id="addr"></p>
+    </div>
+    <button class="logout" onclick="logout()">Logout</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="card">
+    <h3>Order Water</h3>
+    <label>What do you need?</label>
+    <select id="product">
+      <option>Refill (bring back empty gallons)</option>
+      <option>New Gallon (with container)</option>
+      <option>Mineral Water (bottled / case)</option>
+    </select>
+    <label>How many gallons / items?</label>
+    <input id="qty" type="number" min="1" value="1">
+    <label>How many empty gallons do you have?</label>
+    <input id="empty" type="number" min="0" value="0">
+    <label>Notes (optional)</label>
+    <textarea id="notes" placeholder="Preferred delivery time, landmarks..."></textarea>
+    <button class="btn" id="sendBtn">Send Order</button>
+  </div>
+
+  <div class="card">
+    <h3>My Orders</h3>
+    <div id="list"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let me;
+
+async function load() {
+  const { data } = await db.from("orders").select("*")
+    .eq("client_id", me.id).order("created_at", { ascending: false });
+  if (!data || !data.length) { $("list").innerHTML = '<div class="empty">No orders yet. Place your first order above 💧</div>'; return; }
+  $("list").innerHTML = data.map(o => {
+    const idx = STATUSES.indexOf(o.status);
+    const steps = STATUSES.map((s, i) => `<div class="step ${i <= idx ? "done" : ""}">${s}</div>`).join("");
+    return `<div class="order">
+      <div class="head"><b>${esc(o.product)}</b><span class="badge b-${o.status}">${o.status}</span></div>
+      <div class="meta">Quantity: ${o.quantity} &bull; Empty gallons: ${o.empty_gallons}<br>
+      ${o.notes ? "Note: " + esc(o.notes) + "<br>" : ""}${new Date(o.created_at).toLocaleString()}</div>
+      <div class="track">${steps}</div>
+    </div>`;
+  }).join("");
+}
+
+$("sendBtn").onclick = async () => {
+  const qty = parseInt($("qty").value) || 0;
+  if (qty < 1) return toast("Enter a quantity of at least 1");
+  const { error } = await db.from("orders").insert({
+    client_id: me.id,
+    station_id: me.station_id,
+    product: $("product").value,
+    quantity: qty,
+    empty_gallons: parseInt($("empty").value) || 0,
+    notes: $("notes").value.trim()
+  });
+  if (error) return toast(error.message);
+  $("notes").value = "";
+  toast("Order sent to your station!");
+  load();
+};
+
+(async () => {
+  me = await requireRole("client");
+  if (!me) return;
+  $("who").textContent = me.full_name;
+  $("addr").textContent = "📍 " + (me.address || "");
+  load();
+  db.channel("my-orders").on("postgres_changes",
+    { event: "*", schema: "public", table: "orders" }, load).subscribe();
+})();
+</script>
+</body>
+</html>

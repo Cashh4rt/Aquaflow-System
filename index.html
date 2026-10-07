@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AquaFlow - Smart Water Station</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="auth-body">
+<div class="auth-card">
+  <div class="logo">💧</div>
+  <h1>AquaFlow</h1>
+  <p class="sub">Smart Water Refilling Station</p>
+
+  <div class="tabs">
+    <button id="tabLogin" class="active">Login</button>
+    <button id="tabReg">Register</button>
+  </div>
+
+  <div id="loginBox">
+    <label>Email</label><input id="lEmail" type="email" placeholder="you@email.com">
+    <label>Password</label><input id="lPass" type="password" placeholder="Your password">
+    <button class="btn" id="loginBtn">Login</button>
+  </div>
+
+  <div id="regBox" hidden>
+    <label>I am registering as</label>
+    <select id="rRole">
+      <option value="client">Customer</option>
+      <option value="admin">Station Admin (owner)</option>
+    </select>
+    <label>Full name</label><input id="rName" placeholder="Juan Dela Cruz">
+    <label>Phone number</label><input id="rPhone" type="tel" placeholder="09xxxxxxxxx">
+
+    <div id="clientFields">
+      <label>Delivery address</label><input id="rAddress" placeholder="House no., street, barangay">
+      <label>Choose your water station</label>
+      <select id="rStation"><option value="">Loading stations...</option></select>
+    </div>
+    <div id="adminFields" hidden>
+      <label>Station name</label><input id="rStationName" placeholder="Crystal Clear Water Station">
+    </div>
+
+    <label>Email</label><input id="rEmail" type="email" placeholder="you@email.com">
+    <label>Password (min 6 characters)</label><input id="rPass" type="password" placeholder="Create a password">
+    <button class="btn" id="regBtn">Create Account</button>
+  </div>
+
+  <div class="msg" id="msg"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const msg = t => ($("msg").textContent = t);
+
+function showTab(login) {
+  $("loginBox").hidden = !login;
+  $("regBox").hidden = login;
+  $("tabLogin").classList.toggle("active", login);
+  $("tabReg").classList.toggle("active", !login);
+  msg("");
+}
+$("tabLogin").onclick = () => showTab(true);
+$("tabReg").onclick = () => showTab(false);
+
+$("rRole").onchange = () => {
+  const admin = $("rRole").value === "admin";
+  $("adminFields").hidden = !admin;
+  $("clientFields").hidden = admin;
+};
+
+async function loadStations() {
+  const { data } = await db.from("stations").select("id,name").order("name");
+  const s = $("rStation");
+  if (!data || !data.length) { s.innerHTML = '<option value="">No stations yet</option>'; return; }
+  s.innerHTML = '<option value="">Select a station</option>' +
+    data.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
+}
+
+async function goByRole(uid) {
+  const { data: p } = await db.from("profiles").select("role").eq("id", uid).single();
+  location.href = p && p.role === "admin" ? "admin.html" : "client.html";
+}
+
+$("loginBtn").onclick = async () => {
+  msg("");
+  const { data, error } = await db.auth.signInWithPassword({
+    email: $("lEmail").value.trim(), password: $("lPass").value
+  });
+  if (error) return msg(error.message);
+  goByRole(data.user.id);
+};
+
+$("regBtn").onclick = async () => {
+  msg("");
+  const role = $("rRole").value;
+  const name = $("rName").value.trim();
+  const phone = $("rPhone").value.trim();
+  const email = $("rEmail").value.trim();
+  const password = $("rPass").value;
+  if (!name || !phone || !email) return msg("Please fill in all fields.");
+  if (password.length < 6) return msg("Password must be at least 6 characters.");
+
+  const meta = { role, full_name: name, phone };
+  if (role === "admin") {
+    meta.station_name = $("rStationName").value.trim();
+    if (!meta.station_name) return msg("Please enter your station name.");
+  } else {
+    meta.address = $("rAddress").value.trim();
+    meta.station_id = $("rStation").value;
+    if (!meta.address || !meta.station_id) return msg("Please enter your address and choose a station.");
+  }
+
+  const { data, error } = await db.auth.signUp({ email, password, options: { data: meta } });
+  if (error) return msg(error.message);
+  if (data.session) goByRole(data.user.id);
+  else msg("Account created. Please log in.");
+};
+
+(async () => {
+  loadStations();
+  const { data: { session } } = await db.auth.getSession();
+  if (session) goByRole(session.user.id);
+})();
+</script>
+</body>
+</html>
